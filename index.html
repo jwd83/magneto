@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Torrent → Magnet (Debrid-friendly)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial,
+          sans-serif;
+      }
+      body {
+        margin: 0;
+        background: #0b1020;
+        color: #e9eefb;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 40px auto;
+        padding: 24px;
+        background: #111731;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+      p.hint {
+        color: #b9c6ff;
+        margin-top: 0;
+      }
+      .card {
+        background: #0e1430;
+        border: 1px solid #39446f;
+        border-radius: 12px;
+        padding: 16px;
+      }
+      .row {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: 1fr;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      input[type="file"] {
+        padding: 10px;
+        background: #0a1030;
+        border: 1px dashed #44508a;
+        color: #e9eefb;
+        border-radius: 10px;
+        width: 100%;
+      }
+      button {
+        cursor: pointer;
+        border: 0;
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: #5b7cff;
+        color: #fff;
+        font-weight: 600;
+      }
+      button.secondary {
+        background: #2b355f;
+      }
+      .out {
+        margin-top: 14px;
+        padding: 12px;
+        border-radius: 10px;
+        background: #0a1030;
+        border: 1px solid #2b375f;
+        word-break: break-all;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        font-size: 12px;
+        border-radius: 999px;
+        background: #1e2a55;
+        margin-right: 8px;
+        color: #cfe1ff;
+      }
+      .warn {
+        color: #ffd27d;
+      }
+      textarea {
+        width: 100%;
+        min-height: 90px;
+        resize: vertical;
+        padding: 10px;
+        background: #0a1030;
+        color: #e9eefb;
+        border: 1px solid #2b375f;
+        border-radius: 10px;
+      }
+      .kvs {
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        gap: 8px 12px;
+        margin-top: 8px;
+      }
+      .kv {
+        color: #b9c6ff;
+      }
+      .tiny {
+        font-size: 12px;
+        color: #aeb8df;
+      }
+      .flex {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .switch {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .footer {
+        margin-top: 18px;
+        color: #9fb3ff;
+        font-size: 12px;
+      }
+      .success {
+        color: #96ffa6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>
+        Convert <span class="badge">.torrent</span> →
+        <span class="badge">magnet</span>
+      </h1>
+      <p class="hint">
+        Built for debrid services: outputs a <strong>BTIH (hex)</strong> magnet
+        when possible. All local—no uploads.
+      </p>
+
+      <div class="card">
+        <div class="row">
+          <input id="file" type="file" accept=".torrent" />
+          <div class="controls">
+            <label class="switch">
+              <input id="addTrackers" type="checkbox" checked />
+              <span>Add trackers (tr=)</span>
+            </label>
+            <label class="switch">
+              <input id="addName" type="checkbox" checked />
+              <span>Add display name (dn=)</span>
+            </label>
+            <label
+              class="switch"
+              title="Some tools like base32 BTIH, but most debrid work fine with hex."
+            >
+              <input id="includeBase32" type="checkbox" />
+              <span>Also show BTIH (base32)</span>
+            </label>
+            <button id="convert">Convert</button>
+            <button
+              id="copy"
+              class="secondary"
+              title="Copy the first (recommended) magnet"
+            >
+              Copy magnet
+            </button>
+          </div>
+
+          <div id="meta" class="kvs tiny"></div>
+
+          <div class="out">
+            <div><strong>Recommended (Debrid-friendly)</strong></div>
+            <textarea
+              id="magnetPrimary"
+              readonly
+              placeholder="Your magnet (BTIH hex) will appear here..."
+            ></textarea>
+            <div id="compatNote" class="tiny warn"></div>
+          </div>
+
+          <div class="out" id="altBlock" style="display: none">
+            <div><strong>Alternate magnets</strong></div>
+            <div class="flex">
+              <textarea
+                id="magnetBase32"
+                readonly
+                placeholder="BTIH (base32)"
+              ></textarea>
+              <textarea
+                id="magnetBTMH"
+                readonly
+                placeholder="V2 multihash (btmh)"
+              ></textarea>
+            </div>
+            <div class="tiny">
+              Note: Many debrid services still do <em>not</em> accept v2-only
+              (<code>btmh</code>) magnets.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        If AllDebrid/Real-Debrid says “Invalid magnet”, the torrent may be
+        <em>v2-only</em>. Hybrid or v1 torrents will produce a BTIH hash that
+        debrid services accept.
+      </div>
+    </div>
+
+    <script>
+      /**
+       * Minimal bencode decoder/encoder and helpers.
+       * We re-encode the `info` dict canonically (sorted keys), which matches spec and
+       * is accepted by most clients for computing infohashes.
+       * For robust edge cases, extracting the original slice of `info` is ideal,
+       * but this approach works for the overwhelming majority of torrents.
+       */
+
+      // -------- Utilities
+      const textDecoder = new TextDecoder("utf-8");
+      const textEncoder = new TextEncoder();
+
+      function bytesToHex(buf) {
+        return Array.from(new Uint8Array(buf))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+      }
+      function hexToBytes(hex) {
+        const arr = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < hex.length; i += 2)
+          arr[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+        return arr;
+      }
+      function base32NoPad(bytes) {
+        // RFC4648 without padding
+        const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        let bits = 0,
+          value = 0,
+          output = "";
+        for (let i = 0; i < bytes.length; i++) {
+          value = (value << 8) | bytes[i];
+          bits += 8;
+          while (bits >= 5) {
+            output += alphabet[(value >>> (bits - 5)) & 31];
+            bits -= 5;
+          }
+        }
+        if (bits > 0) {
+          output += alphabet[(value << (5 - bits)) & 31];
+        }
+        return output;
+      }
+      function percentEncode(s) {
+        return encodeURIComponent(s).replace(
+          /[!'()*]/g,
+          (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase()
+        );
+      }
+
+      // -------- Bencode decoder
+      function decodeBencode(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let pos = 0;
+
+        function readChar() {
+          return String.fromCharCode(bytes[pos++]);
+        }
+        function peekChar() {
+          return String.fromCharCode(bytes[pos]);
+        }
+
+        function readInt() {
+          // i<digits>e
+          if (readChar() !== "i") throw new Error("Invalid int");
+          let sign = 1;
+          if (peekChar() === "-") {
+            sign = -1;
+            pos++;
+          }
+          let numStr = "";
+          while (peekChar() !== "e") {
+            numStr += readChar();
+          }
+          pos++; // 'e'
+          if (numStr.length === 0) throw new Error("Empty int");
+          if (numStr[0] === "0" && numStr.length > 1)
+            throw new Error("Leading zero");
+          return sign * parseInt(numStr, 10);
+        }
+
+        function readBytes() {
+          // <len>:<bytes>
+          let lenStr = "";
+          while (/[0-9]/.test(peekChar())) {
+            lenStr += readChar();
+          }
+          if (readChar() !== ":") throw new Error('Missing ":" in bytes');
+          const len = parseInt(lenStr, 10);
+          const out = bytes.slice(pos, pos + len);
+          pos += len;
+          return out;
+        }
+
+        function readList() {
+          // l<items>e
+          if (readChar() !== "l") throw new Error("Invalid list");
+          const arr = [];
+          while (peekChar() !== "e") arr.push(readAny());
+          pos++; // 'e'
+          return arr;
+        }
+
+        function readDict() {
+          // d<pairs>e with lexicographically sorted byte-keys per spec
+          if (readChar() !== "d") throw new Error("Invalid dict");
+          const obj = new Map();
+          while (peekChar() !== "e") {
+            const keyBytes = readBytes();
+            const key = textDecoder.decode(keyBytes);
+            const val = readAny();
+            obj.set(key, val);
+          }
+          pos++; // 'e'
+          return obj;
+        }
+
+        function readAny() {
+          const c = peekChar();
+          if (c === "i") return readInt();
+          if (c === "l") return readList();
+          if (c === "d") return readDict();
+          if (/[0-9]/.test(c)) return readBytes();
+          throw new Error("Unexpected token: " + c);
+        }
+
+        const result = readAny();
+        if (pos !== bytes.length) throw new Error("Trailing data");
+        return result;
+      }
+
+      // -------- Bencode encoder (canonical: dict keys sorted by raw bytes of key)
+      function encodeBencode(node) {
+        if (node instanceof Map) {
+          // Sort keys by their raw byte value
+          const entries = Array.from(node.entries())
+            .map(([k, v]) => {
+              const kb = textEncoder.encode(k);
+              return { k, kb, v };
+            })
+            .sort((a, b) => {
+              // lexicographic compare of Uint8Array
+              const A = a.kb,
+                B = b.kb;
+              const len = Math.min(A.length, B.length);
+              for (let i = 0; i < len; i++) {
+                if (A[i] !== B[i]) return A[i] - B[i];
+              }
+              return A.length - B.length;
+            });
+          let out = "d";
+          for (const { k, kb, v } of entries) {
+            out += kb.length + ":" + textDecoder.decode(kb);
+            out += encodeBencode(v);
+          }
+          out += "e";
+          return out;
+        } else if (Array.isArray(node)) {
+          return "l" + node.map(encodeBencode).join("") + "e";
+        } else if (node instanceof Uint8Array) {
+          return node.length + ":" + textDecoder.decode(node);
+        } else if (typeof node === "number") {
+          return "i" + node.toString() + "e";
+        } else if (typeof node === "string") {
+          const b = textEncoder.encode(node);
+          return b.length + ":" + node;
+        } else {
+          throw new Error("Unsupported type in bencode");
+        }
+      }
+
+      // Turn Map-like bencoded dict to plain JS object (strings for byte strings)
+      function decodeToPlain(node) {
+        if (node instanceof Map) {
+          const obj = {};
+          for (const [k, v] of node.entries()) obj[k] = decodeToPlain(v);
+          return obj;
+        } else if (Array.isArray(node)) {
+          return node.map(decodeToPlain);
+        } else if (node instanceof Uint8Array) {
+          // Attempt UTF-8, fall back to hex if not decodable
+          try {
+            return textDecoder.decode(node);
+          } catch {
+            return "0x" + bytesToHex(node);
+          }
+        } else {
+          return node;
+        }
+      }
+
+      // Rebuild a bencode structure where strings we created are encoded as bytes
+      function toBencodeStructure(js) {
+        if (js && js.__b_raw) return js.__b_raw; // allow passing raw
+        if (js && typeof js === "object" && !Array.isArray(js)) {
+          const m = new Map();
+          for (const k of Object.keys(js)) m.set(k, toBencodeStructure(js[k]));
+          return m;
+        } else if (Array.isArray(js)) {
+          return js.map(toBencodeStructure);
+        } else if (typeof js === "string") {
+          return textEncoder.encode(js); // bytes
+        } else if (typeof js === "number") {
+          return js;
+        } else if (js instanceof Uint8Array) {
+          return js;
+        } else {
+          return js;
+        }
+      }
+
+      // Compute SHA-1 / SHA-256 using Web Crypto
+      async function sha1(bytes) {
+        const digest = await crypto.subtle.digest("SHA-1", bytes);
+        return new Uint8Array(digest);
+      }
+      async function sha256(bytes) {
+        const digest = await crypto.subtle.digest("SHA-256", bytes);
+        return new Uint8Array(digest);
+      }
+
+      // Extract trackers from announce / announce-list
+      function extractTrackers(metaPlain) {
+        const set = new Set();
+        if (typeof metaPlain.announce === "string") set.add(metaPlain.announce);
+        const al = metaPlain["announce-list"];
+        if (Array.isArray(al)) {
+          for (const tier of al) {
+            if (Array.isArray(tier))
+              for (const t of tier)
+                if (typeof t === "string") set.add(t);
+                else if (typeof tier === "string") set.add(tier);
+          }
+        }
+        return Array.from(set);
+      }
+
+      // Try to get a reasonable display name
+      function extractName(metaPlain) {
+        try {
+          if (metaPlain.info && typeof metaPlain.info.name === "string")
+            return metaPlain.info.name;
+        } catch {}
+        return "torrent";
+      }
+
+      // Identify v1/v2
+      function detectVersion(metaPlain) {
+        const info = metaPlain.info || {};
+        const isV1 = typeof info.pieces !== "undefined"; // v1 or hybrid
+        const isV2 =
+          (typeof info["meta version"] === "number" &&
+            info["meta version"] === 2) ||
+          typeof info["file tree"] !== "undefined";
+        return { isV1, isV2 };
+      }
+
+      async function convertTorrent(file) {
+        const buf = await file.arrayBuffer();
+
+        // Parse
+        const root = decodeBencode(buf);
+        const metaPlain = decodeToPlain(root);
+
+        if (!(root instanceof Map))
+          throw new Error("Torrent root is not a dict");
+        const infoRaw = root.get("info");
+        if (!infoRaw) throw new Error("Missing info dict");
+
+        // Canonical bencode of info (sorted keys)
+        const infoEncodedStr = encodeBencode(infoRaw);
+        const infoBytes = textEncoder.encode(infoEncodedStr);
+
+        const { isV1, isV2 } = detectVersion(metaPlain);
+        const displayName = extractName(metaPlain);
+        const trackers = extractTrackers(metaPlain);
+
+        let btihHex = null,
+          btihBase32 = null,
+          btmhHex = null;
+
+        if (isV1) {
+          const h1 = await sha1(infoBytes);
+          btihHex = bytesToHex(h1).toUpperCase();
+          btihBase32 = base32NoPad(h1);
+        }
+        if (isV2) {
+          const h2 = await sha256(infoBytes);
+          // multihash = 0x12 (sha256) + 0x20 (length 32) + hash
+          const prefix = new Uint8Array([0x12, 0x20]);
+          const mh = new Uint8Array(prefix.length + h2.length);
+          mh.set(prefix, 0);
+          mh.set(h2, prefix.length);
+          btmhHex = bytesToHex(mh);
+        }
+
+        const params = [];
+        if (document.getElementById("addName").checked && displayName) {
+          params.push("dn=" + percentEncode(displayName));
+        }
+        if (document.getElementById("addTrackers").checked && trackers.length) {
+          for (const tr of trackers) params.push("tr=" + percentEncode(tr));
+        }
+
+        // Build magnets
+        const magnets = {};
+        if (btihHex) {
+          magnets.primary =
+            "magnet:?xt=urn:btih:" +
+            btihHex +
+            (params.length ? "&" + params.join("&") : "");
+          if (document.getElementById("includeBase32").checked) {
+            magnets.base32 =
+              "magnet:?xt=urn:btih:" +
+              btihBase32 +
+              (params.length ? "&" + params.join("&") : "");
+          }
+        } else {
+          magnets.primary = null;
+        }
+
+        if (btmhHex) {
+          magnets.btmh =
+            "magnet:?xt=urn:btmh:" +
+            btmhHex +
+            (params.length ? "&" + params.join("&") : "");
+        }
+
+        // UI fill
+        const metaDiv = document.getElementById("meta");
+        metaDiv.innerHTML = "";
+        function addKV(k, v) {
+          const kEl = document.createElement("div");
+          kEl.className = "kv";
+          kEl.textContent = k;
+          const vEl = document.createElement("div");
+          vEl.textContent = v;
+          metaDiv.appendChild(kEl);
+          metaDiv.appendChild(vEl);
+        }
+        addKV("Name", displayName || "(unknown)");
+        addKV("Has v1 (BTIH)", isV1 ? "Yes" : "No");
+        addKV("Has v2 (BTMH)", isV2 ? "Yes" : "No");
+        addKV("Trackers", trackers && trackers.length ? trackers.length : "0");
+
+        const primaryBox = document.getElementById("magnetPrimary");
+        const compatNote = document.getElementById("compatNote");
+        const altBlock = document.getElementById("altBlock");
+        const base32Box = document.getElementById("magnetBase32");
+        const btmhBox = document.getElementById("magnetBTMH");
+
+        if (magnets.primary) {
+          primaryBox.value = magnets.primary;
+          compatNote.textContent = "";
+        } else {
+          primaryBox.value = "";
+          compatNote.innerHTML =
+            "This torrent appears to be <strong>v2-only</strong>. Most debrid services require a v1/hybrid torrent that yields a BTIH hash. You can try the <code>btmh</code> magnet below, but it may be rejected.";
+        }
+
+        let anyAlt = false;
+        if (
+          document.getElementById("includeBase32").checked &&
+          magnets.base32
+        ) {
+          base32Box.value = magnets.base32;
+          anyAlt = true;
+        } else {
+          base32Box.value = "";
+        }
+        if (magnets.btmh) {
+          btmhBox.value = magnets.btmh;
+          anyAlt = true;
+        } else {
+          btmhBox.value = "";
+        }
+        altBlock.style.display = anyAlt ? "block" : "none";
+
+        return { isV1, isV2, btihHex, btmhHex, displayName, trackers, magnets };
+      }
+
+      document.getElementById("convert").addEventListener("click", async () => {
+        const f = document.getElementById("file").files[0];
+        if (!f) {
+          alert("Choose a .torrent file first.");
+          return;
+        }
+        try {
+          await convertTorrent(f);
+        } catch (e) {
+          console.error(e);
+          alert("Failed to parse .torrent: " + e.message);
+        }
+      });
+
+      document.getElementById("copy").addEventListener("click", async () => {
+        const txt = document.getElementById("magnetPrimary").value.trim();
+        if (!txt) {
+          alert("No primary magnet to copy.");
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(txt);
+          document.getElementById("compatNote").innerHTML =
+            '<span class="success">Copied!</span>';
+          setTimeout(() => {
+            document.getElementById("compatNote").innerHTML = "";
+          }, 1500);
+        } catch {
+          // Fallback
+          document.getElementById("magnetPrimary").select();
+          document.execCommand("copy");
+        }
+      });
+    </script>
+  </body>
+</html>
