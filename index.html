@@ -133,14 +133,12 @@
   </head>
   <body>
     <div class="wrap">
-      <h1>
-        Convert <span class="badge">.torrent</span> →
-        <span class="badge">magnet</span>
-      </h1>
-      <p class="hint">
-        Built for debrid services: outputs a <strong>BTIH (hex)</strong> magnet
-        when possible. All local—no uploads.
-      </p>
+      <h1>Magneto</h1>
+      <h2>
+        Convert <span class="badge">.torrent</span> files to
+        <span class="badge">magnet:</span> links
+      </h2>
+      <p class="hint">Drag your .torrent file here or click to select it.</p>
 
       <div class="card">
         <div class="row">
@@ -167,7 +165,7 @@
               class="secondary"
               title="Copy the first (recommended) magnet"
             >
-              Copy magnet
+              Copy Magnet Link
             </button>
           </div>
 
@@ -204,6 +202,12 @@
           </div>
         </div>
       </div>
+
+      <p>
+        Built for debrid services: outputs a <strong>BTIH (hex)</strong> magnet
+        when possible.
+      </p>
+      <p>All local, absolutely no uploads, perfect as an offline app 😍</p>
 
       <div class="footer">
         If AllDebrid/Real-Debrid says “Invalid magnet”, the torrent may be
@@ -607,6 +611,26 @@
         }
       });
 
+      // --- Drag and drop support ---
+      document.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      });
+      document.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        const files = e.dataTransfer.files;
+        if (files.length && files[0].name.endsWith(".torrent")) {
+          document.getElementById("file").files = files;
+          try {
+            await convertTorrent(files[0]);
+          } catch (err) {
+            alert("Failed to parse .torrent: " + err.message);
+          }
+        } else {
+          alert("Please drop a .torrent file.");
+        }
+      });
+
       document.getElementById("copy").addEventListener("click", async () => {
         const txt = document.getElementById("magnetPrimary").value.trim();
         if (!txt) {
@@ -629,3 +653,6 @@
     </script>
   </body>
 </html>
+<!-- There are No Sides. There’s No Heroes or Villains. There’s Just What I Want and How I’ll Get It. -->
+<!-- Tell Me Again, Apocalypse… Just How Strong You Are. -->
+<!-- Who Am I? I Am Power. Men Call Me Magneto. -->
